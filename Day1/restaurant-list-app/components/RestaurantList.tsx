@@ -3,6 +3,7 @@
 import { useState, useTransition, useMemo } from "react";
 import { deleteRestaurant } from "@/app/actions";
 import { Restaurant, CATEGORIES } from "@/types";
+import EditModal from "@/components/EditModal";
 
 function Stars({ rating }: { rating: number }) {
   return (
@@ -26,37 +27,52 @@ function Badge({ children }: { children: React.ReactNode }) {
 
 function RestaurantItem({ restaurant }: { restaurant: Restaurant }) {
   const [isPending, startTransition] = useTransition();
+  const [editing, setEditing] = useState(false);
 
   return (
-    <li className="flex items-start justify-between bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-4 gap-3">
-      <div className="space-y-1.5 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-bold text-gray-800">{restaurant.name}</p>
-          {restaurant.category && <Badge>{restaurant.category}</Badge>}
+    <>
+      {editing && (
+        <EditModal restaurant={restaurant} onClose={() => setEditing(false)} />
+      )}
+      <li className="flex items-start justify-between bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-4 gap-3">
+        <div className="space-y-1.5 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-bold text-gray-800">{restaurant.name}</p>
+            {restaurant.category && <Badge>{restaurant.category}</Badge>}
+          </div>
+          <p className="text-sm text-gray-500">{restaurant.menu}</p>
+          {(restaurant.district || restaurant.neighborhood) && (
+            <p className="text-xs text-gray-400">
+              📍 {[restaurant.district, restaurant.neighborhood].filter(Boolean).join(" ")}
+            </p>
+          )}
+          {restaurant.address && (
+            <p className="text-xs text-gray-400 truncate">{restaurant.address}</p>
+          )}
+          {restaurant.phone && (
+            <p className="text-xs text-gray-400">📞 {restaurant.phone}</p>
+          )}
+          <Stars rating={restaurant.rating} />
         </div>
-        <p className="text-sm text-gray-500">{restaurant.menu}</p>
-        {(restaurant.district || restaurant.neighborhood) && (
-          <p className="text-xs text-gray-400">
-            📍 {[restaurant.district, restaurant.neighborhood].filter(Boolean).join(" ")}
-          </p>
-        )}
-        {restaurant.address && (
-          <p className="text-xs text-gray-400 truncate">{restaurant.address}</p>
-        )}
-        {restaurant.phone && (
-          <p className="text-xs text-gray-400">📞 {restaurant.phone}</p>
-        )}
-        <Stars rating={restaurant.rating} />
-      </div>
-      <button
-        onClick={() => startTransition(() => deleteRestaurant(restaurant.id))}
-        disabled={isPending}
-        className="text-gray-300 hover:text-red-400 disabled:opacity-40 text-xl leading-none transition-colors shrink-0 mt-0.5"
-        title="삭제"
-      >
-        ✕
-      </button>
-    </li>
+        <div className="flex flex-col gap-2 shrink-0 mt-0.5">
+          <button
+            onClick={() => setEditing(true)}
+            className="text-gray-300 hover:text-blue-400 transition-colors text-sm leading-none"
+            title="수정"
+          >
+            ✎
+          </button>
+          <button
+            onClick={() => startTransition(() => deleteRestaurant(restaurant.id))}
+            disabled={isPending}
+            className="text-gray-300 hover:text-red-400 disabled:opacity-40 text-xl leading-none transition-colors"
+            title="삭제"
+          >
+            ✕
+          </button>
+        </div>
+      </li>
+    </>
   );
 }
 
