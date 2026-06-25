@@ -101,6 +101,7 @@ function FilterChip({
 
 export default function RestaurantList({ restaurants }: { restaurants: Restaurant[] }) {
   const [district, setDistrict] = useState<string>("전체");
+  const [neighborhood, setNeighborhood] = useState<string>("전체");
   const [category, setCategory] = useState<string>("전체");
 
   const districts = useMemo(() => {
@@ -108,13 +109,24 @@ export default function RestaurantList({ restaurants }: { restaurants: Restauran
     return ["전체", ...Array.from(set).sort()];
   }, [restaurants]);
 
+  const neighborhoods = useMemo(() => {
+    const set = new Set(
+      restaurants
+        .filter((r) => district === "전체" || r.district === district)
+        .map((r) => r.neighborhood)
+        .filter(Boolean) as string[]
+    );
+    return ["전체", ...Array.from(set).sort()];
+  }, [restaurants, district]);
+
   const filtered = useMemo(() => {
     return restaurants.filter((r) => {
       const matchDistrict = district === "전체" || r.district === district;
+      const matchNeighborhood = neighborhood === "전체" || r.neighborhood === neighborhood;
       const matchCategory = category === "전체" || r.category === category;
-      return matchDistrict && matchCategory;
+      return matchDistrict && matchNeighborhood && matchCategory;
     });
-  }, [restaurants, district, category]);
+  }, [restaurants, district, neighborhood, category]);
 
   if (restaurants.length === 0) {
     return (
@@ -137,7 +149,22 @@ export default function RestaurantList({ restaurants }: { restaurants: Restauran
               key={d}
               label={d}
               active={district === d}
-              onClick={() => setDistrict(d)}
+              onClick={() => { setDistrict(d); setNeighborhood("전체"); }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* 동네 필터 */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">동네 (동)</p>
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+          {neighborhoods.map((n) => (
+            <FilterChip
+              key={n}
+              label={n}
+              active={neighborhood === n}
+              onClick={() => setNeighborhood(n)}
             />
           ))}
         </div>
@@ -160,7 +187,7 @@ export default function RestaurantList({ restaurants }: { restaurants: Restauran
 
       {/* 결과 수 */}
       <p className="text-sm text-gray-400 px-1">
-        {district !== "전체" || category !== "전체"
+        {district !== "전체" || neighborhood !== "전체" || category !== "전체"
           ? `${filtered.length}개 검색됨 (전체 ${restaurants.length}개)`
           : `총 ${restaurants.length}개`}
       </p>
