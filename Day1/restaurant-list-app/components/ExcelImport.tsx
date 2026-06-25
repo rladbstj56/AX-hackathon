@@ -34,7 +34,9 @@ export default function ExcelImport() {
 
       const parsed: ImportRow[] = [];
 
-      ["동", "서"].forEach((sheetName) => {
+      const targetSheets = wb.SheetNames.filter((s) => s !== "회사부근 맛집->");
+
+      targetSheets.forEach((sheetName) => {
         const ws = wb.Sheets[sheetName];
         if (!ws) return;
 
