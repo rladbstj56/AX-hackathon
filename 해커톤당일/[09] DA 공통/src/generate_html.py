@@ -185,8 +185,8 @@ def build_insight_html(data):
     stats = "".join([
         _stat(_won(t['total_spend']), "총 지출 (유료 광고비)", "", "c-blue"),
         _stat(_won(t['total_revenue']), "총 매출 (오가닉 포함)",
-              f"오가닉 {t['organic_revenue']/t['total_revenue']*100:.1f}%", "c-green"),
-        _stat(f"{t['mer']:.1f}%", "전체 마케팅 효율 (MER)", f"유료 순효율 {t['paid_roi']:.1f}%", "c-purple"),
+              f"오가닉 {t['organic_revenue']/t['total_revenue']*100:.2f}%", "c-green"),
+        _stat(f"{t['mer']:.2f}%", "전체 마케팅 효율 (MER)", f"유료 순효율 {t['paid_roi']:.2f}%", "c-purple"),
         _stat(f"{t['total_conversions']:,.0f}", "총 전환수", "건", "c-red"),
     ])
     body = [
