@@ -10,8 +10,9 @@ from html import escape
 import pandas as pd
 
 from detect_issues import BAND_SHORT
-from generate_report import build_summary_points, _status
-from reallocate import run_pipeline
+from generate_report import build_summary_points, build_playbook, _status
+from reallocate import (run_pipeline, build_action_checklist, plan_lead_sentence,
+                        PRIORITY_CRITERIA, PRIORITY_CAVEAT)
 
 INSIGHT_OUT = 'output/insight_report.html'
 REALLOC_OUT = 'output/budget_reallocation.html'
@@ -76,6 +77,34 @@ td.lnum { text-align: left; font-variant-numeric: tabular-nums; }
 .summary li:last-child { border-bottom:none; } .summary li b { color:#2d6a4f; }
 .foot { font-size:12px; color:#999; text-align:center; padding:8px 0 4px; }
 ol.crit { margin:6px 0 0 18px; } ol.crit li { font-size:13px; margin-bottom:8px; }
+.guide { background:#f0f7f4; border-radius:12px; padding:20px 26px; margin-bottom:24px; border-left:5px solid #40916c; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.guide.rx { background:#f6f2ff; border-left-color:#7048e8; }
+.guide h3 { font-size:15px; margin-bottom:10px; } .guide .note { margin-bottom:10px; }
+.guide ul { list-style:none; } .guide li { font-size:13px; padding:5px 0; }
+.guide li b { color:#2d6a4f; } .guide.rx li b { color:#5b34b5; }
+.checklist { background:#fff; border-radius:12px; padding:22px 28px; margin-bottom:24px; border-left:5px solid #e8590c; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+.checklist h3 { font-size:15px; margin-bottom:6px; } .checklist .note { margin-bottom:12px; }
+.checklist ul { list-style:none; } .checklist li:last-child { border-bottom:none; }
+.checklist li { font-size:14px; padding:10px 0 10px 30px; border-bottom:1px solid #f0f2f5; position:relative; }
+.checklist li:before { content:'☐'; position:absolute; left:0; top:8px; font-size:17px; color:#e8590c; }
+.playbook { border-left:5px solid #e8590c; }
+.pb-rank { font-weight:800; color:#e8590c; text-align:center; }
+.when-now { color:#e63946; font-weight:700; } .when-wk { color:#e8590c; font-weight:700; } .when-mo { color:#6c757d; font-weight:600; }
+td.owner { color:#495057; white-space:nowrap; }
+.plan-lead { background:#f8f6ff; border-radius:8px; padding:13px 16px; font-size:14px; line-height:1.7; margin:2px 0 14px; }
+.plan-lead b { color:#5b34b5; }
+.flow { display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; margin:6px 0 16px; }
+.flow-node { border-radius:10px; padding:12px 18px; text-align:center; min-width:132px; }
+.flow-node.from { border:2px solid #f1b0b7; background:#fff5f4; }
+.flow-node.to { border:2px solid #9dc9b4; background:#f2f9f5; }
+.flow-node .fn-name { font-weight:700; font-size:15px; }
+.flow-node .fn-roas { font-size:11px; color:#777; margin-top:3px; }
+.flow-node .fn-amt { font-size:14px; font-weight:800; margin-top:7px; }
+.fn-amt.neg { color:#e63946; } .fn-amt.pos { color:#2d6a4f; }
+.flow-arrow { text-align:center; color:#7048e8; line-height:1.35; }
+.flow-arrow .fa-amt { font-size:13px; font-weight:700; } .flow-arrow .fa-line { font-size:24px; }
+.ratio { display:inline-block; background:#7048e8; color:#fff; font-size:11px; font-weight:700; padding:2px 9px; border-radius:11px; margin-top:3px; }
+.plan .subhead { font-size:12px; color:#999; margin:12px 0 6px; font-weight:700; }
 """
 
 
@@ -130,6 +159,56 @@ def _channel_table(summary):
             "<div class='tbl-wrap'><table><thead><tr><th>채널</th><th>광고비</th><th>매출</th>"
             "<th>전환</th><th>ROI</th><th>ROAS</th><th>CPA</th><th>CTR</th><th>CVR</th></tr></thead><tbody>"
             + "".join(rows) + "</tbody></table></div>")
+
+
+def _usage_guide_html(meta):
+    """진단 리포트 상단 '사용법' 박스 html — md _usage_guide와 같은 내용, 렌더만 다름."""
+    return ("<div class='guide'><h3>📖 이 리포트, 이렇게 쓰세요</h3><ul>"
+            f"<li><b>무엇</b> · 지난 {meta['n_weeks']}주 마케팅 성과를 데이터에서 직접 계산·해석한 주간 점검 리포트</li>"
+            "<li><b>누가·언제</b> · [경영진] 성과 브리핑 때 '한눈에 보기'만 / [마케터] 주간 예산·소재 결정 때 이슈·채널 평가 근거로</li>"
+            "<li><b>읽는 순서</b> · ① 한눈에 보기 → ② 이번 주 실행 플레이북(할 일 전체) → ③ 이슈·채널 평가(근거) → ④ 전주 대비 변화율(급변 감시)</li>"
+            "<li><b>액션 연결</b> · [예산] 태그→예산 재배분 기획안, [데이터·트래킹]→트래킹팀 정정, [운영]→채널 담당자 확인</li>"
+            "</ul></div>")
+
+
+def _rx_usage_html():
+    """재배분 기획안 상단 '읽고 실행하는 법' 박스 html."""
+    return ("<div class='guide rx'><h3>📖 이 기획안, 읽고 실행하는 법</h3>"
+            "<p class='note'>이 문서가 답하는 질문: \"회수 가능한 예산을 어디로 옮겨야 매출이 늘까?\"</p><ul>"
+            "<li><b>1단계</b> · §1 재원 요약에서 회수가능액(확실히 뺄 돈) 확인 — 임팩트는 우선순위 참고용 추정치</li>"
+            "<li><b>2단계</b> · §2 재배분안을 1순위부터 — [어디→어디, 얼마] + [기대효과·한계] 확인</li>"
+            "<li><b>3단계</b> · 1순위를 소액 테스트 집행 → 2주 후 ROAS 재측정 → 개선 시 확대, 아니면 다음 순위</li>"
+            "<li><b>주의</b> · 여러 안이 같은 재원 공유 시 돈은 한 번만 — 동시 집행 금지</li>"
+            "</ul></div>")
+
+
+def _checklist_html(data):
+    """데이터 파생 '지금 당장 할 일' 체크리스트 html — md와 동일한 build_action_checklist를 렌더."""
+    items = "".join(f"<li>{escape(it)}</li>" for it in build_action_checklist(data))
+    return ("<div class='checklist'><h3>✅ 지금 당장 할 일 (이번 데이터 기준)</h3>"
+            "<p class='note'>아래 순서대로 실행하세요. 수치는 이번 성과 데이터에서 자동 산출된 값입니다.</p>"
+            f"<ul>{items}</ul></div>")
+
+
+_WHEN_CLASS = {'즉시': 'when-now', '이번 주': 'when-wk', '이번 달': 'when-mo'}
+
+
+def _playbook_html(data):
+    """'이번 주 실행 플레이북' 표 html — md와 동일한 build_playbook을 렌더만 다르게."""
+    items = build_playbook(data)
+    note = ("<p class='note'>리포트 전체에 흩어진 조치를 우선순위·담당·시점으로 취합 — 이 표만으로 이번 주 팀 업무 분배가 됩니다. "
+            "(담당은 역할 예시로, 조직의 실제 담당자로 대체)</p>")
+    if not items:
+        return ('<div class="section playbook"><div class="section-title">🎯 이번 주 실행 플레이북</div>'
+                f'{note}<p>이번 주 특별히 실행할 조치가 없습니다 — 현 운영을 유지하세요.</p></div>')
+    rows = "".join(
+        f"<tr><td class='pb-rank'>{it['rank']}</td><td>{escape(it['action'])}</td>"
+        f"<td>{escape(it['basis'])}</td><td class='owner'>{escape(it['owner'])}</td>"
+        f"<td class='{_WHEN_CLASS.get(it['when'], '')}'>{escape(it['when'])}</td></tr>" for it in items)
+    return ('<div class="section playbook"><div class="section-title">🎯 이번 주 실행 플레이북</div>'
+            f"{note}<div class='tbl-wrap'><table><thead><tr><th>순위</th><th>할 일</th>"
+            "<th>근거</th><th>담당</th><th>시점</th></tr></thead><tbody>"
+            f"{rows}</tbody></table></div></div>")
 
 
 def _exec_summary_html(data):
@@ -257,7 +336,9 @@ def build_insight_html(data):
         f'<span>📅 {escape(str(m["date_min"]))} – {escape(str(m["date_max"]))} ({m["n_weeks"]}주)</span>'
         f'<span>📊 원본 {m["n_raw"]}행 · 중복 {m["n_dup"]}·이상치 {m["n_outlier"]}·결측 {m["n_missing"]} 처리</span>'
         '<span>🐍 계산: Python pandas</span></div></div>',
+        _usage_guide_html(m),
         _exec_summary_html(data),
+        _playbook_html(data),
         f'<div class="stats-row">{stats}</div>',
         f'<div class="section"><div class="section-title">📊 채널별 ROI 순위</div>'
         f'<p class="note">ROI = 매출 / 광고비 × 100. 오가닉은 광고비 0이라 측정 불가.</p>'
@@ -278,29 +359,50 @@ def build_insight_html(data):
 
 
 def _plan_card(r):
-    if r['kind'] == '광고 증액':
-        move = f"<b>{escape(r['source'])} → {escape(r['target'])}</b>, {_won(r['amount_won'])}(테스트 상한), 점진 증액 후 재측정"
+    """재배분안 카드 — 돈의 흐름(source −금액 ➜ target +금액)을 시각화하고 '쉽게 말하면' 한 줄을 앞세운다.
+
+    핵심 액션을 1초에 잡게 하고(플로우+효율 배수), 분석가 양식 4항목은 '자세한 근거'로 강등한다.
+    """
+    amt = _won(r['amount_won'])
+    from_sub = f"ROAS {r['source_roas']:.2f}" if not pd.isna(r['source_roas']) else "저효율 지출"
+    if r['kind'] == '광고 증액' and not pd.isna(r['target_roas']):
+        to_sub = f"ROAS {r['target_roas']:.2f}"
+        ratio_badge = ""
+        if not pd.isna(r['source_roas']) and r['source_roas'] > 0:
+            ratio_badge = f"<div class='ratio'>{r['target_roas']/r['source_roas']:.1f}배 효율 ↑</div>"
+        move = f"{escape(r['source'])} → {escape(r['target'])}, {amt}(테스트 상한)으로 시작해 점진 증액 후 재측정"
         effect = (f"순증 매출 상한 약 <b>{_won(r['expected_won'])}</b> (선형확장 가정). "
-                  "한계수익 체감으로 실제는 하회 가능 — 소액 테스트로 검증 후 확대.")
+                  "실제는 한계수익 체감으로 하회 가능 — 소액 테스트로 검증 후 확대하세요.")
     else:
-        move = f"<b>{escape(r['source'])} → {escape(r['target'])}</b>, {_won(r['amount_won'])} 범위 내 SEO·콘텐츠 투자(광고비 직접 배정 아님)"
+        to_sub = "장기 자산 · 즉시 ROAS 없음"
+        ratio_badge = ""
+        move = f"{escape(r['source'])} → {escape(r['target'])}, {amt} 범위 내 SEO·콘텐츠 투자(광고비 직접 배정 아님)"
         effect = "오가닉은 ROAS 측정불가라 원 단위 추정 없이 정성 기대(중장기 유입 성장). 효과 발현에 시차 존재."
+    flow = (f"<div class='flow'>"
+            f"<div class='flow-node from'><div class='fn-name'>{escape(r['source'])}</div>"
+            f"<div class='fn-roas'>{from_sub}</div><div class='fn-amt neg'>−{amt}</div></div>"
+            f"<div class='flow-arrow'><div class='fa-amt'>{amt}</div><div class='fa-line'>➜</div>{ratio_badge}</div>"
+            f"<div class='flow-node to'><div class='fn-name'>{escape(r['target'])}</div>"
+            f"<div class='fn-roas'>{to_sub}</div><div class='fn-amt pos'>+{amt}</div></div></div>")
+    lead = f"<div class='plan-lead'><b>핵심 실행</b> · {escape(plan_lead_sentence(r))}</div>"
     return (f"<div class='plan'><div class='plan-h'><span class='pr'>{r['rank']}순위</span>"
-            f"{escape(r['source'])} → {escape(r['target'])} · {escape(r['kind'])}"
-            f"<span style='color:#888;font-weight:400;font-size:12px;margin-left:8px'>"
-            f"(임팩트 {_won(r['impact_won'])} × 빈도 {r['frequency']}주)</span></div>"
-            f"<div class='issue-row'><b>1. 문제 정의</b> {escape(r['source'])} 과집행: 회수 가능한 저효율 지출.</div>"
-            f"<div class='issue-row'><b>2. 근거 데이터</b> 회수가능액 {_won(r['amount_won'])} / 재원채널 평소 ROAS {r['source_roas']:.2f} / 수혜: {escape(str(r['basis']))}</div>"
-            f"<div class='issue-row'><b>3. 재배분안</b> {move}</div>"
-            f"<div class='issue-row'><b>4. 기대효과·한계</b> {effect}</div></div>")
+            f"예산 재배분<span style='color:#888;font-weight:400;font-size:12px;margin-left:8px'>"
+            f"우선순위 점수 {r['priority_score']:,.0f} = 놓친 매출 {_won(r['impact_won'])} × 반복 {r['frequency']}주 (클수록 먼저)</span></div>"
+            f"{flow}{lead}"
+            "<div class='subhead'>자세한 근거</div>"
+            f"<div class='issue-row'><b>무엇이 문제</b> · {escape(r['source'])} 과집행으로 회수 가능한 저효율 지출이 발생했습니다.</div>"
+            f"<div class='issue-row'><b>근거 숫자</b> · 회수가능액 {amt} / {escape(r['source'])} 평소 ROAS {r['source_roas']:.2f} / 수혜 근거: {escape(str(r['basis']))}</div>"
+            f"<div class='issue-row'><b>실행 방법</b> · {move}</div>"
+            f"<div class='issue-row'><b>기대와 주의</b> · {effect}</div></div>")
 
 
 def build_reallocation_html(data):
     funding, plans = data['funding'], data['plans']
     body = ['<div class="header rx"><span class="badge rx">예산 재배분 기획안</span>'
-            '<h1>예산 재배분 기획안 (처방)</h1><div class="header-meta">'
+            '<h1>예산 재배분 기획안</h1><div class="header-meta">'
             '<span>진단(insight_report)의 처방 — 예산으로 무엇을 할지</span>'
-            '<span>재원 원칙: 예산 레버(과집행)만 · 데이터 오류 제외</span></div></div>']
+            '<span>재원 원칙: 예산 레버(과집행)만 · 데이터 오류 제외</span></div></div>',
+            _rx_usage_html(), _checklist_html(data)]
 
     if funding.empty:
         body.append('<div class="section"><div class="section-title">재원 요약</div>'
@@ -309,8 +411,8 @@ def build_reallocation_html(data):
         body.append('<div class="foot">계산: Python · md 리포트와 동일한 run_pipeline 결과</div>')
         return _page("예산 재배분 기획안", "rx", "\n".join(body))
 
-    frows = "".join(f"<tr><td>{escape(f['channel'])}</td><td class='num'>{_won(f['recoverable_won'])}</td>"
-                    f"<td class='num'>{_won(f['impact_won'])}</td><td class='num'>{f['frequency']}주</td>"
+    frows = "".join(f"<tr><td>{escape(f['channel'])}</td><td class='lnum'>{_won(f['recoverable_won'])}</td>"
+                    f"<td class='lnum'>{_won(f['impact_won'])}</td><td class='lnum'>{f['frequency']}주</td>"
                     f"<td>{escape(str(f['weeks']))}</td></tr>" for _, f in funding.iterrows())
     body.append('<div class="section"><div class="section-title">💰 재원 요약 (어디서 얼마를 회수하나)</div>'
                 "<p class='note'>회수가능액(옮길 돈)은 실지출이라 확실하고, 기회손실(임팩트)은 '평소 효율이었다면' 가정이 섞인 추정치.</p>"
@@ -327,14 +429,12 @@ def build_reallocation_html(data):
         note = ("<div class='callout'><b>재원 공유 주의</b> — 위 안들은 같은 재원(과집행 회수분)을 공유한다. "
                 "1순위를 우선 집행하고 성과 확인 후 다음 순위로 순차 배분한다.</div>" if shared else "")
         body.append(f'<div class="section"><div class="section-title">📑 재배분안 (우선순위 순)</div>{cards}{note}</div>')
+        crit = "".join(f"<li><b>{escape(title)}</b><br>{escape(body)}</li>" for title, body in PRIORITY_CRITERIA)
         body.append(
-            '<div class="section"><div class="section-title">⚖️ 우선순위 판단 기준 (설계 근거)</div>'
-            '<ol class="crit">'
-            '<li><b>1차 = 임팩트 × 빈도.</b> 임팩트만 보면 1주 대형사고와 매주 새는 구멍을 못 가린다. 빈도를 곱해 반복되는 구조적 낭비를 위로.</li>'
-            '<li><b>2차(동점) = 수혜처 즉효성.</b> 같은 재원 공유 시 점수가 같아, 즉시 ROAS가 실현되는 광고 증액을 전략 투자보다 우선.</li>'
-            '<li><b>옮기는 금액 = 회수가능액(≠임팩트).</b> 실제 회수 가능한 초과지출만 옮긴다. 임팩트로 옮기면 허수 기획.</li>'
-            '<li><b>수혜처 = 절대 ROI가 아니라 시장 벤치마크 정성 등급.</b> 절대 1위는 포화 가능(한계수익 체감). 시장 대비 우수라 증액 여력 검증된 채널을 선택.</li>'
-            '</ol></div>')
+            '<div class="section"><div class="section-title">⚖️ 우선순위, 이렇게 정했습니다 (판단 기준)</div>'
+            "<p class='note'>아무렇게나가 아니라 데이터 규칙으로 줄을 세웁니다.</p>"
+            f'<ol class="crit">{crit}</ol>'
+            f"<div class='callout'><b>정직한 고지</b> · {escape(PRIORITY_CAVEAT)}</div></div>")
     body.append('<div class="foot">계산: Python · 표현: HTML 대시보드 · md 리포트와 동일한 run_pipeline 결과</div>')
     return _page("예산 재배분 기획안", "rx", "\n".join(body))
 

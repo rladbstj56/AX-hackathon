@@ -30,6 +30,19 @@ def won(x):
     return f"{x:,.0f}원"
 
 
+def _usage_guide(meta):
+    """리포트 최상단 '사용법' 박스 (고객 중심 갭 보완) — 처음 보는 독자가 무엇을·어떻게 볼지 안내.
+
+    독자별(경영진/마케터) 읽는 지점과 순서, 이슈 태그를 실제 액션으로 잇는 경로를 명시한다.
+    n_weeks만 데이터에서 채우고 나머지는 고정 안내라 새 CSV에도 그대로 재현된다.
+    """
+    return ("> 이 리포트가 무엇이고 누가 어떻게 쓰는지 먼저 안내합니다. 처음 보는 분은 여기부터 읽으세요.\n\n"
+            f"- **무엇**: 지난 {meta['n_weeks']}주 마케팅 성과를 데이터에서 직접 계산·해석한 주간 점검 리포트입니다.\n"
+            "- **누가·언제**: [경영진] 성과 브리핑 때 '한눈에 보기'만 봐도 전체·위험을 판단 / [마케터] 주간 예산·소재 결정 때 이슈·채널 평가를 근거로 사용.\n"
+            "- **읽는 순서**: ① 한눈에 보기(전체 성과·위험) → ② 이번 주 실행 플레이북(지금 할 일 전체) → ③ 이슈·채널 평가(플레이북의 근거) → ④ 전주 대비 변화율(급변 감시).\n"
+            "- **액션으로 잇기**: 이슈의 `[예산]` 태그는 예산 재배분 기획안(budget_reallocation)으로 실행, `[데이터·트래킹]`은 트래킹팀에 정정 요청, `[운영]`은 담당 채널자 확인.\n")
+
+
 def _overview(meta):
     return (f"- 분석 대상: {meta['path']} (원본 {meta['n_raw']}행, 채널 {meta['n_channels']}개)\n"
             f"- 분석 기간: {meta['date_min']} – {meta['date_max']} ({meta['n_weeks']}주: {meta['weeks']})\n"
@@ -72,6 +85,7 @@ def _summary(s):
 
 def _roi_rank(roi_df):
     rows = ["> ROI = 매출 / 광고비 × 100. 오가닉은 광고비 0이라 측정 불가로 제외.\n",
+            "> **활용**: 효율 높은 채널을 키울 후보로 보되, 절대 ROI만으로 정하지 말고 아래 6번 시장 벤치마크 등급과 함께 판단하세요 — 절대 1위여도 자기 시장 대비 미달일 수 있습니다.\n",
             "| 순위 | 채널 | ROI(%) |", "|------|------|--------|"]
     for i, (ch, r) in enumerate(roi_df.iterrows(), 1):
         rows.append(f"| {i} | {ch} | {r['ROI']:.2f} |")
@@ -113,7 +127,9 @@ def _status(itype, channel, recency, threshold):
 
 def _issues(ranked, recency, threshold):
     rows = ["> 손실 이슈는 원(₩) 매출 영향으로 통일해 정렬하되, **예산·운영으로 실행 가능한 손실**과 "
-            "**데이터 정정 사안**을 분리한다 — 성격이 달라 조치도 다르기 때문. 규칙 기반 자동 탐지 결과.\n"]
+            "**데이터 정정 사안**을 분리한다 — 성격이 달라 조치도 다르기 때문. 규칙 기반 자동 탐지 결과.\n",
+            "> **활용**: 각 이슈의 대괄호 태그가 곧 담당·조치처입니다 — `[예산]`은 예산 재배분 기획안으로, "
+            "`[데이터·트래킹]`은 트래킹팀 정정 요청, `[운영]`은 채널 담당자 확인으로 넘기세요.\n"]
     loss = ranked.get('loss')
     if loss is None or loss.empty:
         actionable = data_fix = loss  # 둘 다 None/empty → 아래에서 '없음' 처리
@@ -210,6 +226,7 @@ def _benchmark(ranked):
         "> - **평균이상**: 시장 중간보다 나음 → 현상 유지·소폭 최적화",
         "> - **개선여지(평균 이하)**: 시장 중간에 못 미침 → 증액 보류, 원인부터 개선",
         "> - 종합 등급은 최종 성과인 **ROAS** 기준. CTR·CVR은 퍼널 어디가 약한지 진단용(CTR 약함=소재·타겟, CVR 약함=랜딩·오퍼).\n",
+        "> **활용**: 맨 오른쪽 '제안 방향' 열이 곧 예산 액션입니다 — 증액 후보부터 늘리고, 개선 우선 채널은 원인 교정 후 재검토, 유지 채널은 현상 유지하세요.\n",
         "| 채널 | CTR | CVR | ROAS(종합) | 제안 방향 |",
         "|------|-----|-----|-----------|-----------|",
     ]
@@ -285,6 +302,79 @@ def build_summary_points(d):
     return pts
 
 
+def build_playbook(d):
+    """리포트 곳곳에 흩어진 조치를 '이번 주 실행 플레이북' 한 리스트로 취합 — md·html 공유.
+
+    입력: run_pipeline 결과(ranked·plans). 출력: dict 리스트 [{rank, action, basis, owner, when}].
+    이미 계산된 판단(재배분·손실·벤치마크·관찰·긍정)을 실무 액션으로 '번역'만 한다 — 새 계산 없음.
+    담당·시점을 붙여 리포트를 '읽을거리'에서 '업무 분배 도구'로 바꾼다. tier(1급함~3)로 정렬.
+    """
+    ranked, plans = d['ranked'], d['plans']
+    items = []   # 각 항목에 trank(유형 우선), amt(동유형 내 금액 정렬용) 부여. 최종 정렬은 시점→유형→금액.
+
+    if not plans.empty:   # 예산 재배분 — 실제 회수 가능한 손실·즉시. 시점 최상단.
+        p = plans.iloc[0]
+        exp = f", 순증 상한 {won(p['expected_won'])}" if not pd.isna(p['expected_won']) else ""
+        items.append({'trank': 0, 'amt': p['priority_score'],
+                      'action': f"{p['source']} 과집행 차단 후 회수분을 {p['target']}에 재배분",
+                      'basis': f"초과지출 {won(p['amount_won'])}{exp} · 상세: 예산 재배분 기획안",
+                      'owner': '마케팅 리드', 'when': '즉시'})
+
+    loss = ranked.get('loss')
+    if loss is not None and not loss.empty:   # 데이터 정정 — 수치 신뢰도, 왜곡 금액 큰 순
+        for _, r in loss[loss['lever'] == '데이터·트래킹'].iterrows():
+            items.append({'trank': 1, 'amt': r['impact_won'],
+                          'action': f"{r['channel']} {r['type']} 원본 재확인·보정",
+                          'basis': f"왜곡·추정 {won(r['impact_won'])} (예산 손실 아님)",
+                          'owner': '트래킹팀', 'when': '이번 주'})
+
+    b = ranked.get('benchmark')
+    covered = set(plans['target']) if not plans.empty else set()
+    if b is not None and not b.empty:   # 벤치마크 방향 — 증액 후보(미커버)·개선 우선만 (유지는 제외)
+        for _, r in b.iterrows():
+            if r['direction'] == '증액 후보' and r['channel'] not in covered:
+                items.append({'trank': 2, 'amt': 0,
+                              'action': f"{r['channel']} 증액 검토",
+                              'basis': str(r['action']), 'owner': '마케팅 리드', 'when': '이번 주'})
+            elif r['direction'] == '개선 우선':
+                items.append({'trank': 4, 'amt': 0,
+                              'action': f"{r['channel']} 효율 개선 (증액 보류)",
+                              'basis': str(r['action']), 'owner': '채널 담당', 'when': '이번 달'})
+
+    op = ranked.get('operational')
+    if op is not None and not op.empty:   # 운영 관찰 — 의도 여부 확인
+        for _, r in op.iterrows():
+            items.append({'trank': 3, 'amt': 0,
+                          'action': f"{r['channel']} {r['type']} 의도 여부 담당자 확인",
+                          'basis': f"{r['week']} 발생 · 의도적 조정인지 불명",
+                          'owner': '채널 담당', 'when': '이번 주'})
+
+    pos = ranked.get('positive')
+    if pos is not None and not pos.empty:   # 긍정 신호 — 성공요인 분석·확대
+        for _, r in pos.iterrows():
+            items.append({'trank': 5, 'amt': 0,
+                          'action': f"{r['channel']} 성공요인 분석 후 확대 검토",
+                          'basis': f"{r['week']} 성과 호재", 'owner': '마케팅 리드', 'when': '이번 달'})
+
+    when_rank = {'즉시': 0, '이번 주': 1, '이번 달': 2}
+    items.sort(key=lambda x: (when_rank[x['when']], x['trank'], -x['amt']))
+    for i, it in enumerate(items, 1):
+        it['rank'] = i
+    return items
+
+
+def _playbook_md(d):
+    items = build_playbook(d)
+    head = ["> 리포트 전체에 흩어진 조치를 **우선순위·담당·시점**으로 취합했습니다. 이 표만으로 이번 주 팀 업무 분배가 됩니다. "
+            "(담당은 역할 예시 — 조직의 실제 담당자로 대체)\n"]
+    if not items:
+        return "\n".join(head) + "\n이번 주 특별히 실행할 조치가 탐지되지 않았습니다 — 현 운영을 유지하세요.\n"
+    rows = ["| 순위 | 할 일 | 근거 | 담당 | 시점 |", "|------|------|------|------|------|"]
+    for it in items:
+        rows.append(f"| {it['rank']} | {it['action']} | {it['basis']} | {it['owner']} | {it['when']} |")
+    return "\n".join(head + rows) + "\n"
+
+
 def _executive_summary(d):
     """리포트 최상단 요약 박스 md (갭1) — 경영진이 받자마자 성과·액션·위험을 얻도록."""
     lines = ["## 한눈에 보기 (Executive Summary)\n",
@@ -332,7 +422,9 @@ def build_report(data_path=DATA, data=None):
 
     parts = ["# 마케팅 성과 인사이트 리포트\n",
              "> 계산: Python (calculate.py) · 이슈 탐지: detect_issues.py · 해석: 규칙 기반 + Claude\n",
-             _executive_summary(d)]
+             "## 이 리포트 사용법\n\n" + _usage_guide(d['meta']),
+             _executive_summary(d),
+             "## 🎯 이번 주 실행 플레이북\n\n" + _playbook_md(d)]
     for i, (title, body) in enumerate(sections, 1):
         parts.append(f"## {i}. {title}\n\n{body}")
     report = "\n---\n\n".join(parts)

@@ -52,7 +52,7 @@ def check(label, path):
         r_state = '재원 있으나 수혜처 없음'
     else:
         r_state = f'재배분안 {n_plans}건'
-        if '우선순위 판단 기준' not in realloc:  # 재배분안이 있으면 설계 근거 섹션 필수
+        if '판단 기준' not in realloc:  # 재배분안이 있으면 우선순위 설계 근거 섹션 필수
             r_missing.append('우선순위 판단 기준')
 
     ok = not missing and not tilde and not r_missing and not r_tilde and html_ok
