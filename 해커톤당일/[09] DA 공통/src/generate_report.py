@@ -1,0 +1,230 @@
+"""insight_report.md 자동 생성 — 수치·표는 계산 엔진에서, 해석은 규칙 기반 템플릿으로.
+
+calculate.py(집계)·detect_issues.py(이슈)를 불러 새 CSV에도 동일 품질의 리포트를 재현한다.
+권장 조치는 임의 서술이 아니라 industry-news.md 4장 '성과 이슈 패턴(유형 A~D)'에 매핑한다.
+"""
+import sys
+
+import pandas as pd
+
+from detect_issues import BAND_SHORT
+from reallocate import run_pipeline
+
+DATA = 'data/marketing_performance.csv'
+OUT = 'output/insight_report.md'
+
+# 이슈 유형 → 권장 조치 (industry-news.md 4장 유형 A~D 대응)
+REC = {
+    '광고비급등(과집행)': "예산 한도 설정, 타겟 세분화, 소재 교체 (유형 A: 광고비 급증 후 ROAS 하락)",
+    '매출이상치': "원본 데이터 재확인, 중복·테스트 주문 제거 후 재집계 (유형 D: 비현실적 급등)",
+    'revenue결측': "즉시 담당자 확인, 수동 보정 또는 '데이터 없음' 명시 (유형 C: 데이터 결측)",
+    'impressions결측': "트래킹 코드·플랫폼 API 점검 (유형 C: 데이터 결측)",
+    'clicks결측': "트래킹 코드·플랫폼 API 점검 (유형 C: 데이터 결측)",
+    '광고비급락(집행축소)': "의도적 감축인지 집행 중단 사고인지 담당자 확인",
+    '성과급락': "랜딩페이지 A/B 테스트, UX·경쟁·소재 소진 점검 (유형 B)",
+    '성과호재': "성공 요인 분석 후 예산 확대 검토",
+}
+
+
+def won(x):
+    return f"{x:,.0f}원"
+
+
+def _overview(meta):
+    return (f"- 분석 대상: {meta['path']} (원본 {meta['n_raw']}행, 채널 {meta['n_channels']}개)\n"
+            f"- 분석 기간: {meta['date_min']} – {meta['date_max']} ({meta['n_weeks']}주: {meta['weeks']})\n"
+            "- 데이터 정제:\n"
+            f"  - 완전 중복 {meta['n_dup']}행 제거 ({meta['n_raw']}→{meta['n_raw']-meta['n_dup']}행)\n"
+            f"  - 결측 {meta['n_missing']}건 NaN 유지 — 0으로 채우지 않고 집계에서 자동 제외\n"
+            f"  - 매출 이상치 {meta['n_outlier']}건 revenue만 제외(AOV modified z-score>3.5 자동 탐지) — 정상 지출·전환은 보존\n"
+            "  - 오가닉(광고비 0) ROI 측정 불가로 순위 제외\n")
+
+
+def _summary(s):
+    t = s['total']
+    rows = ["| 지표 | 값 |", "|------|-----|",
+            f"| 총 지출 (유료 광고비) | {won(t['total_spend'])} |",
+            f"| 총 매출 (전 채널, 오가닉 포함) | {won(t['total_revenue'])} |",
+            f"| ├ 오가닉(비유료) 매출 | {won(t['organic_revenue'])} ({t['organic_revenue']/t['total_revenue']*100:.2f}%) |",
+            f"| └ 유료채널 매출 | {won(t['paid_revenue'])} |",
+            f"| 전체 마케팅 효율 MER (오가닉 포함) | {t['mer']:.2f}% |",
+            f"| 유료 광고 순효율 (오가닉 제외) | {t['paid_roi']:.2f}% |",
+            f"| 총 전환수 | {t['total_conversions']:,.0f}건 |\n",
+            "> MER은 경영진용(마케팅 조직 전체 성과), 유료 순효율은 마케팅팀용(광고 운영 효율).\n",
+            "### 채널별 합계·파생지표\n",
+            "| 채널 | 광고비(원) | 매출(원) | 전환 | ROI(%) | ROAS | CTR(%) | CVR(%) |",
+            "|------|-----------|---------|------|--------|------|--------|--------|"]
+    g = s['by_channel']
+    for ch in g.sort_values('revenue', ascending=False).index:   # 채널 목록을 데이터에서 동적으로
+        r = g.loc[ch]
+        roi = "측정불가" if pd.isna(r['ROI']) else f"{r['ROI']:.2f}"
+        roas = "-" if pd.isna(r['ROAS']) else f"{r['ROAS']:.2f}"
+        rows.append(f"| {ch} | {r['spend']:,.0f} | {r['revenue']:,.0f} | {r['conversions']:,.0f} | "
+                    f"{roi} | {roas} | {r['CTR']:.2f} | {r['CVR']:.2f} |")
+    return "\n".join(rows) + "\n"
+
+
+def _roi_rank(roi_df):
+    rows = ["> ROI = 매출 / 광고비 × 100. 오가닉은 광고비 0이라 측정 불가로 제외.\n",
+            "| 순위 | 채널 | ROI(%) |", "|------|------|--------|"]
+    for i, (ch, r) in enumerate(roi_df.iterrows(), 1):
+        rows.append(f"| {i} | {ch} | {r['ROI']:.2f} |")
+    rows.append("| - | 오가닉 | 측정 불가 (광고비 0) |")
+    top = roi_df.index[0]
+    rows.append(f"\n**해석**: 가장 효율적인 유료 채널은 {top}(ROI {roi_df.iloc[0]['ROI']:.2f}%). "
+                "단 절대 효율(ROI)이 높다고 채널 벤치마크 대비 잘하는 것은 아니므로 6번 채널 평가와 함께 볼 것.\n")
+    return "\n".join(rows)
+
+
+def _issues(ranked):
+    rows = ["> 손실 이슈는 원(₩) 매출 영향으로 통일해 정렬. 규칙 기반 자동 탐지 결과.\n"]
+    loss = ranked.get('loss')
+    rows.append("### 핵심 이슈 3가지 (손실 임팩트 상위)\n")
+    if loss is None or loss.empty:
+        rows.append("이번 기간에는 임계값을 넘는 손실 이슈(급등·급락·이상치·결측)가 탐지되지 않았습니다.\n")
+    else:
+        for i, (_, r) in enumerate(loss.head(3).iterrows(), 1):
+            rows += [f"**이슈 {i}: {r['channel']} — {r['type']} (임팩트 {won(r['impact_won'])}) `[{r['lever']}]`**",
+                     f"- 현상·근거: {r['note']}",
+                     f"- 발생: {r['weeks']} (빈도 {r['frequency']}주)",
+                     f"- 권장 조치: {REC.get(r['type'], '원인 분석 후 대응')}\n"]
+        rows.append("> `[레버]`는 조치 수단: **예산**(재배분 대상)·**운영·크리에이티브**(소재·타겟 개선)·"
+                    "**데이터·트래킹**(수집·기록 오류로 예산과 무관). 예산 재배분은 budget_reallocation.md 참조.\n")
+
+    if 'operational' in ranked:
+        rows.append("### 운영 관찰 (손실은 아니나 확인 필요)\n")
+        for _, r in ranked['operational'].iterrows():
+            rows.append(f"- **{r['channel']} {r['type']}** ({r['week']}): {r['note']}")
+            rows.append(f"  - 권장: {REC.get(r['type'], '담당자 확인')}\n")
+
+    if 'quality' in ranked:
+        rows.append("### 데이터 수집 품질 이슈\n")
+        for _, r in ranked['quality'].iterrows():
+            rows.append(f"- {r['note']} → {REC.get(r['type'], '트래킹 점검')}")
+        rows.append("")
+
+    if 'positive' in ranked:
+        rows.append("### 주목할 긍정 신호\n")
+        for _, r in ranked['positive'].iterrows():
+            rows.append(f"- **{r['channel']} {r['type']}** ({r['week']}): {r['note']} → {REC.get(r['type'], '')}")
+        rows.append("")
+    return "\n".join(rows)
+
+
+def _wow(wow_df):
+    prev, curr = wow_df.columns[0], wow_df.columns[1]   # 실제 마지막 두 주차 (하드코딩 제거)
+    rows = [f"| 지표 | {prev} | {curr} | 변화율(%) | 상태 |", "|------|----|----|----------|------|"]
+    label = {'spend': '지출', 'revenue': '매출', 'conversions': '전환수', 'CTR': 'CTR'}
+    max_abs = 0
+    for m in ['spend', 'revenue', 'conversions', 'CTR']:
+        r = wow_df.loc[m]
+        chg = r['change_pct']
+        max_abs = max(max_abs, abs(chg))
+        state = "↑↑" if chg >= 50 else "↑" if chg > 5 else "→" if chg >= -5 else "↓↓" if chg <= -50 else "↓"
+        v0 = f"{r[prev]:,.0f}" if m != 'CTR' else f"{r[prev]:.2f}%"
+        v1 = f"{r[curr]:,.0f}" if m != 'CTR' else f"{r[curr]:.2f}%"
+        rows.append(f"| {label[m]} | {v0} | {v1} | {chg:+.2f} | {state} |")
+    verdict = (f"모든 지표가 ±50% 이내(최대 변동 {max_abs:.2f}%)로 {prev}→{curr}는 안정적. 급변 없음."
+               if max_abs < 50 else f"일부 지표가 ±50%를 초과({prev}→{curr} 최대 {max_abs:.2f}%) — 급변 발생, 원인 확인 필요.")
+    rows.append(f"\n> {verdict}\n")
+    return "\n".join(rows)
+
+
+_DIR_ORDER = ['증액 후보', '유지', '개선 우선', '측정불가']
+_DIR_LABEL = {'증액 후보': '증액 후보', '유지': '유지', '개선 우선': '개선 우선',
+              '측정불가': '측정불가(별도 판단)'}
+
+
+def _benchmark(ranked):
+    b = ranked['benchmark']
+    rows = [
+        "> **여기서 '등급'은 우리 회사 주차 비교가 아니라, 같은 채널을 운영하는 업계 분포(2026 한국 시장 벤치마크, "
+        "industry-news.md) 대비 위치다.** 출처가 업계 통용 추정치라 정성 판단용으로만 쓰고 원(₩) 랭킹엔 넣지 않는다.\n",
+        "> 등급의 뜻과 그에 따른 조치:",
+        "> - **우수(상위25%↑)**: 그 채널을 쓰는 회사들 상위 25%보다 잘함 → 검증된 효율, 증액해도 효율 유지 기대(증액 후보)",
+        "> - **평균이상**: 시장 중간보다 나음 → 현상 유지·소폭 최적화",
+        "> - **개선여지(평균 이하)**: 시장 중간에 못 미침 → 증액 보류, 원인부터 개선",
+        "> - 종합 등급은 최종 성과인 **ROAS** 기준. CTR·CVR은 퍼널 어디가 약한지 진단용(CTR 약함=소재·타겟, CVR 약함=랜딩·오퍼).\n",
+        "| 채널 | CTR | CVR | ROAS(종합) | 제안 방향 |",
+        "|------|-----|-----|-----------|-----------|",
+    ]
+    for _, r in b.iterrows():
+        roas_cell = "측정불가" if pd.isna(r['ROAS']) else f"{r['ROAS']:.2f}({BAND_SHORT[r['roas_band']]})"
+        rows.append(f"| {r['channel']} | {r['CTR']:.2f}%({BAND_SHORT[r['ctr_band']]}) | "
+                    f"{r['CVR']:.2f}%({BAND_SHORT[r['cvr_band']]}) | {roas_cell} | {r['action']} |")
+
+    groups = {}
+    for _, r in b.iterrows():
+        groups.setdefault(r['direction'], []).append(r['channel'])
+    parts = [f"{_DIR_LABEL[d]} = {', '.join(groups[d])}" for d in _DIR_ORDER if d in groups]
+    rows.append(f"\n**핵심 인사이트 (예산 방향)**: {' / '.join(parts)}. "
+                "종합 등급은 ROAS(시장 대비 매출효율) 기준이라, 절대 ROI 순위가 높아도 자기 채널 시장 벤치마크로는 "
+                "미달일 수 있다(예: 이메일 — 절대 ROI 1위지만 CRM 벤치마크 대비 개선여지). "
+                "증액은 '증액 후보'부터, '개선 우선' 채널은 원인 교정 후 재검토한다.\n")
+    return "\n".join(rows)
+
+
+def _opportunity(ranked):
+    rows = []
+    for _, r in ranked['opportunity'].iterrows():
+        rows.append(f"- **{r['channel']}**: {r['note']}")
+    rows.append("\n> **오가닉은 '무료'가 아니다.** 과거 유료 광고의 낙수효과(브랜딩→검색·직접 유입)와 "
+                "SEO·콘텐츠 투자가 누적된 결과이며, 단지 현재 기간 광고비 원장에 직접 귀속되는 클릭당 비용이 0일 뿐이다. "
+                "광고비를 직접 배정하는 채널이 아니므로 'SEO·콘텐츠 투자 확대' 또는 '브랜딩 광고의 낙수효과 활용'으로 키운다 "
+                "(industry-news 채널 믹스 전략).\n>\n"
+                "> ⚠️ 오가닉 매출의 일부는 유료 채널(특히 브랜딩)의 기여이므로, 채널 ROI를 독립적으로 비교하면 "
+                "이 교차 기여를 놓친다. 정밀 예산 배분은 MTA/MMM 등 교차 채널 기여 분석이 필요하다(industry-news 트렌드 2).\n")
+    return "\n".join(rows)
+
+
+def _decisions():
+    # 방법론(데이터와 무관하게 고정)만 기술 — 특정 수치·날짜는 데이터마다 달라지므로 넣지 않음.
+    return ("상세 근거·이력은 decisions.md 참조. 적용한 방법론:\n"
+            "- 결측: NaN 유지(0으로 채우지 않음), 집계 자동 제외\n"
+            "- 매출 이상치: 채널별 AOV modified z-score>3.5로 동적 탐지 → revenue만 제외(정상 지출·전환 보존)\n"
+            "- 완전 중복 행: drop_duplicates로 제거(집계 부풀림 방지)\n"
+            "- 전체 ROI: MER(오가닉 포함)·유료 순효율·오가닉 매출 3종 분리 표기\n"
+            "- 이슈 탐지: LOO 중앙값 기준선 + 임계값 35% + 원(₩) 임팩트 정렬. 과집행은 'ROAS 하락' 조건\n"
+            "- 채널 평가: 내부 순위가 아닌 industry-news 벤치마크 대비 정성 판정\n")
+
+
+def build_report(data_path=DATA, data=None):
+    """insight_report.md를 생성한다. data(run_pipeline 결과)를 받으면 재사용, 없으면 직접 실행.
+
+    html 생성기와 같은 결과를 공유하도록 data 주입을 허용 — 수치가 md·html 간 어긋나지 않게.
+    """
+    d = data or run_pipeline(data_path)
+    s, ranked, wow = d['summary'], d['ranked'], d['wow']
+    prev, curr = wow.columns[0], wow.columns[1]
+    # 섹션은 (제목, 본문) 리스트로 모아 번호를 동적으로 매긴다.
+    # 기회 섹션은 조건(유의미한 오가닉 매출)을 만족할 때만 존재하므로, 빠져도 번호에 구멍이 안 생긴다.
+    sections = [
+        ("데이터 개요", _overview(d['meta'])),
+        ("핵심 수치 요약", _summary(s)),
+        ("채널별 ROI 순위", _roi_rank(d['roi'])),
+        ("이슈 (비즈니스 임팩트 순)", _issues(ranked)),
+        (f"전주 대비 변화율 ({prev} → {curr})", _wow(wow)),
+        ("채널 평가 (시장 벤치마크 대비)", _benchmark(ranked)),
+    ]
+    if 'opportunity' in ranked:   # 유의미한 오가닉이 있을 때만 포함 (없으면 생략, KeyError 방지)
+        sections.append(("오가닉 성장 잠재력", _opportunity(ranked)))
+    sections.append(("의사결정 로그 요약", _decisions()))
+
+    parts = ["# 마케팅 성과 인사이트 리포트\n",
+             "> 계산: Python (calculate.py) · 이슈 탐지: detect_issues.py · 해석: 규칙 기반 + Claude\n"]
+    for i, (title, body) in enumerate(sections, 1):
+        parts.append(f"## {i}. {title}\n\n{body}")
+    report = "\n---\n\n".join(parts)
+    # 물결표(~)는 마크다운에서 쌍으로 만나면 취소선(~~)이 되어 글자가 지워져 보인다.
+    # 본 리포트의 ~는 모두 범위 표기(W1~W8, 날짜)이므로 엔대시로 치환해 취소선 오작동을 원천 차단.
+    return report.replace('~', '–')
+
+
+if __name__ == '__main__':
+    # 사용법: python3 src/generate_report.py [입력CSV] [출력MD]  (인자 생략 시 기본 샘플·경로)
+    data_path = sys.argv[1] if len(sys.argv) > 1 else DATA
+    out_path = sys.argv[2] if len(sys.argv) > 2 else OUT
+    report = build_report(data_path)
+    with open(out_path, 'w') as f:
+        f.write(report)
+    print(f"생성 완료: {out_path} ({len(report):,}자) ← 입력: {data_path}")

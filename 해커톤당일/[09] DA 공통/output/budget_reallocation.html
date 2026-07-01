@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>예산 재배분 기획안</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif; background: #f4f5f7; color: #1a1a2e; line-height: 1.6; }
+.container { max-width: 1080px; margin: 0 auto; padding: 40px 24px; }
+.header { background: #fff; border-radius: 12px; padding: 32px 36px; margin-bottom: 24px; border-left: 5px solid #2d6a4f; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.header.rx { border-left-color: #7048e8; }
+.badge { display: inline-block; background: #2d6a4f; color: #fff; font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; margin-bottom: 14px; letter-spacing: .5px; }
+.badge.rx { background: #7048e8; }
+.header h1 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+.header-meta { font-size: 13px; color: #6c757d; display: flex; flex-wrap: wrap; gap: 16px; }
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+.stat { background: #fff; border-radius: 10px; padding: 20px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.06); border-top: 4px solid; }
+.stat-n { font-size: 26px; font-weight: 800; }
+.stat-label { font-size: 13px; color: #666; margin-top: 2px; }
+.stat-sub { font-size: 12px; color: #999; margin-top: 4px; }
+.c-red { border-color: #e63946; color: #e63946; } .c-blue { border-color: #4361ee; color: #4361ee; }
+.c-green { border-color: #2d6a4f; color: #2d6a4f; } .c-purple { border-color: #7048e8; color: #7048e8; }
+.section { background: #fff; border-radius: 12px; padding: 28px 32px; margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.section-title { font-size: 15px; font-weight: 700; padding-bottom: 14px; margin-bottom: 20px; border-bottom: 1px solid #eee; }
+.note { font-size: 12px; color: #888; margin-bottom: 14px; }
+.bar-row { margin-bottom: 12px; }
+.bar-meta { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 5px; font-weight: 600; }
+.bar-track { background: #f0f2f5; border-radius: 6px; height: 30px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 12px; color: #fff; font-size: 12px; font-weight: 700; }
+.bar-na { height: 30px; background: repeating-linear-gradient(45deg,#eef0f3,#eef0f3 8px,#e3e6ea 8px,#e3e6ea 16px); border-radius: 6px; display: flex; align-items: center; padding-left: 12px; color: #888; font-size: 12px; font-weight: 700; }
+.tbl-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+thead th { background: #f8f9fa; font-size: 12px; font-weight: 700; color: #6c757d; padding: 10px 12px; text-align: left; border-bottom: 2px solid #e9ecef; white-space: nowrap; }
+tbody td { padding: 9px 12px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+tbody tr:hover { background: #f8f9fb; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.lnum { text-align: left; font-variant-numeric: tabular-nums; }
+.rank { font-weight: 800; color: #4361ee; }
+.tag { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:5px; }
+.t-best { background:#d0ebe0; color:#1f5c3d; } .t-mid { background:#dde3ff; color:#3452cc; }
+.t-low { background:#fff3cd; color:#856404; } .t-na { background:#e9ecef; color:#495057; }
+.t-budget { background:#ffe0d6; color:#b5341a; } .t-data { background:#e9ecef; color:#495057; }
+.t-ops { background:#dde3ff; color:#3452cc; } .t-strat { background:#e7dcff; color:#5b34b5; }
+.chg-up { color:#2d6a4f; font-weight:700; } .chg-down { color:#e63946; font-weight:700; }
+.issue { border:1px solid #eee; border-left:4px solid #e63946; border-radius:8px; padding:16px 18px; margin-bottom:14px; }
+.issue.budget { border-left-color:#e8590c; } .issue.data { border-left-color:#868e96; }
+.issue-h { font-size:14px; font-weight:700; margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.issue-row { font-size:13px; margin-top:4px; } .issue-row b { color:#555; }
+.plan { border:1px solid #e7dcff; border-left:4px solid #7048e8; border-radius:8px; padding:18px 20px; margin-bottom:16px; }
+.plan-h { font-size:14px; font-weight:700; margin-bottom:10px; }
+.plan-h .pr { background:#7048e8; color:#fff; border-radius:6px; padding:2px 9px; font-size:12px; margin-right:8px; }
+.callout { background:#f8f6ff; border-radius:8px; padding:14px 18px; font-size:13px; color:#4a3a7a; margin-top:6px; }
+.foot { font-size:12px; color:#999; text-align:center; padding:8px 0 4px; }
+ol.crit { margin:6px 0 0 18px; } ol.crit li { font-size:13px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header rx"><span class="badge rx">예산 재배분 기획안</span><h1>예산 재배분 기획안 (처방)</h1><div class="header-meta"><span>진단(insight_report)의 처방 — 예산으로 무엇을 할지</span><span>재원 원칙: 예산 레버(과집행)만 · 데이터 오류 제외</span></div></div>
+<div class="section"><div class="section-title">💰 재원 요약 (어디서 얼마를 회수하나)</div><p class='note'>회수가능액(옮길 돈)은 실지출이라 확실하고, 기회손실(임팩트)은 '평소 효율이었다면' 가정이 섞인 추정치.</p><div class='tbl-wrap'><table><thead><tr><th>재원 채널</th><th>회수가능액</th><th>기회손실(임팩트)</th><th>빈도</th><th>발생</th></tr></thead><tbody><tr><td>메타광고</td><td class='num'>3,194,281원</td><td class='num'>8,822,424원</td><td class='num'>1주</td><td>W5</td></tr></tbody></table></div></div>
+<div class="section"><div class="section-title">📑 재배분안 (우선순위 순)</div><div class='plan'><div class='plan-h'><span class='pr'>1순위</span>메타광고 → 네이버광고 · 광고 증액<span style='color:#888;font-weight:400;font-size:12px;margin-left:8px'>(임팩트 8,822,424원 × 빈도 1주)</span></div><div class='issue-row'><b>1. 문제 정의</b> 메타광고 과집행: 회수 가능한 저효율 지출.</div><div class='issue-row'><b>2. 근거 데이터</b> 회수가능액 3,194,281원 / 재원채널 평소 ROAS 2.59 / 수혜: ROAS 6.59 — 시장 벤치마크 상위25% 이상(증액 여력 검증)</div><div class='issue-row'><b>3. 재배분안</b> <b>메타광고 → 네이버광고</b>, 3,194,281원(테스트 상한), 점진 증액 후 재측정</div><div class='issue-row'><b>4. 기대효과·한계</b> 순증 매출 상한 약 <b>12,772,685원</b> (선형확장 가정). 한계수익 체감으로 실제는 하회 가능 — 소액 테스트로 검증 후 확대.</div></div><div class='plan'><div class='plan-h'><span class='pr'>2순위</span>메타광고 → 오가닉 · 전략 투자(SEO·콘텐츠)<span style='color:#888;font-weight:400;font-size:12px;margin-left:8px'>(임팩트 8,822,424원 × 빈도 1주)</span></div><div class='issue-row'><b>1. 문제 정의</b> 메타광고 과집행: 회수 가능한 저효율 지출.</div><div class='issue-row'><b>2. 근거 데이터</b> 회수가능액 3,194,281원 / 재원채널 평소 ROAS 2.59 / 수혜: 광고비 직접지출 0(무료 아님 — 과거 유료광고 낙수효과·SEO 누적 결과), 매출 104,238,814(전체 23.71%), CVR 3.11%</div><div class='issue-row'><b>3. 재배분안</b> <b>메타광고 → 오가닉</b>, 3,194,281원 범위 내 SEO·콘텐츠 투자(광고비 직접 배정 아님)</div><div class='issue-row'><b>4. 기대효과·한계</b> 오가닉은 ROAS 측정불가라 원 단위 추정 없이 정성 기대(중장기 유입 성장). 효과 발현에 시차 존재.</div></div><div class='callout'><b>재원 공유 주의</b> — 위 안들은 같은 재원(과집행 회수분)을 공유한다. 1순위를 우선 집행하고 성과 확인 후 다음 순위로 순차 배분한다.</div></div>
+<div class="section"><div class="section-title">⚖️ 우선순위 판단 기준 (설계 근거)</div><ol class="crit"><li><b>1차 = 임팩트 × 빈도.</b> 임팩트만 보면 1주 대형사고와 매주 새는 구멍을 못 가린다. 빈도를 곱해 반복되는 구조적 낭비를 위로.</li><li><b>2차(동점) = 수혜처 즉효성.</b> 같은 재원 공유 시 점수가 같아, 즉시 ROAS가 실현되는 광고 증액을 전략 투자보다 우선.</li><li><b>옮기는 금액 = 회수가능액(≠임팩트).</b> 실제 회수 가능한 초과지출만 옮긴다. 임팩트로 옮기면 허수 기획.</li><li><b>수혜처 = 절대 ROI가 아니라 시장 벤치마크 정성 등급.</b> 절대 1위는 포화 가능(한계수익 체감). 시장 대비 우수라 증액 여력 검증된 채널을 선택.</li></ol></div>
+<div class="foot">계산: Python · 표현: HTML 대시보드 · md 리포트와 동일한 run_pipeline 결과</div>
+</div>
+</body>
+</html>
