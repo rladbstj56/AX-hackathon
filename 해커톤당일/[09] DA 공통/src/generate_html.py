@@ -94,8 +94,9 @@ td.led { font-weight: 800; color: #1f5c3d; background: #eaf6f0; }
 .foot { font-size:12px; color:#999; text-align:center; padding:8px 0 4px; }
 ol.crit { margin:6px 0 0 18px; } ol.crit li { font-size:13px; margin-bottom:8px; }
 .playbook { border-left:5px solid #e8590c; }
+.playbook table { table-layout: fixed; }
 .pb-rank { font-weight:800; color:#e8590c; text-align:center; }
-.when-now { color:#e63946; font-weight:700; } .when-wk { color:#e8590c; font-weight:700; } .when-mo { color:#6c757d; font-weight:600; }
+.when-now { color:#e63946; font-weight:700; white-space:nowrap; } .when-wk { color:#e8590c; font-weight:700; white-space:nowrap; } .when-mo { color:#6c757d; font-weight:600; white-space:nowrap; }
 td.owner { color:#495057; white-space:nowrap; }
 .plan-lead { background:#f8f6ff; border-radius:8px; padding:13px 16px; font-size:14px; line-height:1.7; margin:2px 0 14px; }
 .plan-lead b { color:#5b34b5; }
@@ -219,8 +220,10 @@ def _playbook_html(data):
         f"<tr><td class='pb-rank'>{it['rank']}</td><td>{escape(it['action'])}</td>"
         f"<td>{escape(it['basis'])}</td><td class='owner'>{escape(it['owner'])}</td>"
         f"<td class='{_WHEN_CLASS.get(it['when'], '')}'>{escape(it['when'])}</td></tr>" for it in items)
+    colgroup = ("<colgroup><col style='width:6%'><col style='width:30%'><col style='width:34%'>"
+                "<col style='width:14%'><col style='width:16%'></colgroup>")
     return ('<div class="section playbook"><div class="section-title">이번 주 업무 우선순위</div>'
-            f"{note}<div class='tbl-wrap'><table><thead><tr><th>순위</th><th>할 일</th>"
+            f"{note}<div class='tbl-wrap'><table>{colgroup}<thead><tr><th>순위</th><th>할 일</th>"
             "<th>근거</th><th>담당</th><th>시점</th></tr></thead><tbody>"
             f"{rows}</tbody></table></div></div>")
 
